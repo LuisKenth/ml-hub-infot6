@@ -22,7 +22,6 @@ export default function Dashboard() {
         setUser(data.user);
         fetchArticles();
 
-        // Notipikasyon sa email ng Admin na may nag-login
         try {
           await fetch("/api/send-email", {
             method: "POST",
@@ -118,11 +117,10 @@ export default function Dashboard() {
       setContent(""); 
       setSourceUrl(""); 
       fetchArticles();
-
       alert("Article published successfully!");
 
       try {
-        const response = await fetch("/api/send-article", {
+        await fetch("/api/send-article", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -130,16 +128,32 @@ export default function Dashboard() {
             message: `User ${user?.email} has published a new article: "${title}".`,
           }),
         });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          console.error("Email API Error:", errData);
-        }
       } catch (e) {
         console.error("Failed to reach email API.", e);
       }
     } else {
       alert("Error saving article to database: " + error.message);
+    }
+  };
+
+  // --- NEW: Share Logic Function ---
+  const handleShare = async (article) => {
+    const shareUrl = `${baseUrl}/article/${article.id}`;
+    const shareData = {
+      title: article.title,
+      text: `Check out this ML insight: ${article.title}`,
+      url: shareUrl,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        console.log("Share cancelled", err);
+      }
+    } else {
+      await navigator.clipboard.writeText(shareUrl);
+      alert("Link copied! You can now paste and share it to Facebook or Telegram.");
     }
   };
 
@@ -189,9 +203,8 @@ export default function Dashboard() {
                 <div style={styles.cardFooter}>
                   <div style={styles.footerLeft}>
                     {a.source_url && <a href={a.source_url} target="_blank" rel="noreferrer" style={styles.sourceLink}>View Original Source</a>}
-                    <button onClick={() => { navigator.clipboard.writeText(`${baseUrl}/article/${a.id}`); alert("Link Copied!"); }} style={styles.actionBtn}>Share</button>
+                    <button onClick={() => handleShare(a)} style={styles.actionBtn}>Share</button>
                   </div>
-                  {/* Bagong LikeButton na may bagong design at logic */}
                   <LikeButton articleId={a.id} initialLikes={a.likes} user={user} onLikeToggled={fetchArticles} />
                 </div>
               </div>
@@ -227,61 +240,27 @@ function LikeButton({ articleId, initialLikes, user, onLikeToggled }) {
   }, [articleId, user]);
 
   const handleLike = async () => {
-    if (!user) {
-      return alert("Mangyaring mag-log in upang i-like ang article na ito.");
-    }
+    if (!user) return alert("Please log in to like.");
     if (loading) return;
     setLoading(true);
 
     try {
       if (isLiked) {
-        // Dislike / Un-heart
-        const { error: deleteError } = await supabase
-          .from("likes")
-          .delete()
-          .eq("article_id", articleId)
-          .eq("user_id", user.id);
-
-        if (deleteError) throw deleteError;
-
+        await supabase.from("likes").delete().eq("article_id", articleId).eq("user_id", user.id);
         const newCount = Math.max(0, likesCount - 1);
-        
-        const { error: updateError } = await supabase
-          .from("articles")
-          .update({ likes: newCount })
-          .eq("id", articleId);
-
-        if (updateError) throw updateError;
-
+        await supabase.from("articles").update({ likes: newCount }).eq("id", articleId);
         setLikesCount(newCount);
         setIsLiked(false);
       } else {
-        // Like / Heart
-        const { error: insertError } = await supabase
-          .from("likes")
-          .insert([{ article_id: articleId, user_id: user.id }]);
-
-        if (insertError) throw insertError;
-
+        await supabase.from("likes").insert([{ article_id: articleId, user_id: user.id }]);
         const newCount = likesCount + 1;
-        
-        const { error: updateError } = await supabase
-          .from("articles")
-          .update({ likes: newCount })
-          .eq("id", articleId);
-
-        if (updateError) throw updateError;
-
+        await supabase.from("articles").update({ likes: newCount }).eq("id", articleId);
         setLikesCount(newCount);
         setIsLiked(true);
       }
-
-      if (onLikeToggled) {
-        onLikeToggled(); // Ire-refresh at i-o-order ang listahan pataas
-      }
+      if (onLikeToggled) onLikeToggled();
     } catch (err) {
-      console.error("Error toggling like:", err);
-      alert("May naganap na error. Subukan muli.");
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -296,8 +275,6 @@ function LikeButton({ articleId, initialLikes, user, onLikeToggled }) {
         background: isLiked ? "#ffe4e6" : "#ffffff",
         borderColor: isLiked ? "#e11d48" : "#cbd5e1",
         color: isLiked ? "#e11d48" : "#475569",
-        boxShadow: isLiked ? "0 2px 8px rgba(225, 29, 72, 0.12)" : "none",
-        cursor: loading ? "not-allowed" : "pointer",
         transition: "all 0.2s ease-in-out"
       }}
     >
@@ -367,9 +344,6 @@ function ReplySection({ comment, user }) {
       {replies.map((r) => (
         <div key={r.id} style={styles.replyItem}>
           ↳ {r.text} 
-          <span style={{ fontSize: "0.70rem", color: "#64748b", marginLeft: "6px" }}>
-            {r.created_at ? new Date(r.created_at).toLocaleString("en-PH") : "Just now"}
-          </span>
         </div>
       ))}
       {showInput && (
